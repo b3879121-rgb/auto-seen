@@ -111,6 +111,21 @@ python tools\train_ppe.py
 ```
 會自動下載 Ultralytics Construction-PPE 資料集 (約 620MB，CC BY 4.0) 並訓練 YOLO11n，完成後輸出 `models/ppe_yolo11n.pt`。RTX 4060 約 20–30 分鐘。沒有這個檔案時系統仍可執行，只是只會偵測禁區。
 
+> 倉庫內已附上訓練好的 `models/ppe_yolo11n.pt` (60 epochs)，clone 下來就能直接用，不必重新訓練。
+
+驗證集 (200 張) 成績：
+
+| 類別 | Precision | Recall | mAP50 |
+|---|---|---|---|
+| helmet 安全帽 | 0.93 | 0.78 | 0.86 |
+| vest 反光背心 | 0.94 | 0.88 | 0.91 |
+| Person 人員 | 0.95 | 0.90 | 0.94 |
+| no_helmet | 0.80 | 0.58 | 0.64 |
+| no_vest | 0.91 | 0.64 | 0.72 |
+| 全部 12 類平均 | 0.87 | 0.71 | 0.77 |
+
+「有戴」的類別比「沒戴」準很多，所以系統以「頭部區域找不到安全帽」為主要判斷依據，`no_helmet` 只當輔助。
+
 ### 3. 啟動
 ```bash
 python run.py

@@ -419,9 +419,10 @@ class VisionWorker:
         if person:
             x1, y1, x2, y2 = person["box"]
             cv2.rectangle(img, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), (255, 0, 255), 3)
-        stamp = now.strftime("%Y-%m-%d %H:%M:%S") + f"  CAM_01  {event}"
-        cv2.putText(img, stamp, (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3)
-        cv2.putText(img, stamp, (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 1)
+        # 底部 HUD 列換成存證浮水印 (黑底白字，不和畫面其他文字重疊)
+        stamp = now.strftime("%Y-%m-%d %H:%M:%S") + f"  CAM_01  {event}" + (f"  ID {tid}" if tid is not None else "")
+        cv2.rectangle(img, (0, VIDEO_HEIGHT - 24), (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0), -1)
+        cv2.putText(img, stamp, (8, VIDEO_HEIGHT - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         cv2.imwrite(str(folder / name), img, [cv2.IMWRITE_JPEG_QUALITY, 88])
 
         severity, message = EVENT_TEXT[event]
