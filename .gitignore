@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 資料集與訓練輸出 (執行 tools/train_ppe.py 會自動下載與產生)
+datasets/
+training/
+training_log.txt
+runs/
+
+# 預訓練權重 (Ultralytics 會自動下載)；models/ 內自己訓練的模型仍會上傳
+/*.pt
+
+# 執行時產生的資料 (含人臉照片，不上傳)
+evidence/
+live_snapshot.jpg
+videos/
+zone.json
+.site_id
+
+# 編輯器 / 工具
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

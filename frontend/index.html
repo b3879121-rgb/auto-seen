@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFactory AIoT — 智慧工廠工安與邊緣視覺連動監控系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Apache ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Noto Sans TC', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        darkBg: '#0f172a',
+                        cardBg: '#1e293b',
+                        borderBg: '#334155',
+                        accentCyan: '#06b6d4',
+                        accentDanger: '#ef4444',
+                        accentWarning: '#f59e0b',
+                        accentSuccess: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 呼吸警報燈特效 */
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.8), inset 0 0 10px rgba(239, 68, 68, 0.8); }
+            50% { box-shadow: 0 0 28px rgba(239, 68, 68, 1), inset 0 0 15px rgba(239, 68, 68, 1); }
+        }
+        .tower-red-active {
+            background-color: #ef4444 !important;
+            animation: pulse-red 1s infinite;
+        }
+        .tower-yellow-active {
+            background-color: #f59e0b !important;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.8);
+        }
+        .tower-green-active {
+            background-color: #10b981 !important;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.8);
+        }
+        /* 滾動條美化 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="bg-darkBg text-slate-100 min-h-screen font-sans antialiased flex flex-col">
+
+    <!-- 頂部導航欄 (Header) -->
+    <header class="bg-cardBg/80 backdrop-blur-md border-b border-borderBg px-6 py-3.5 flex flex-wrap items-center justify-between sticky top-0 z-50 shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-md">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    SafeFactory AIoT
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">v2.0.0</span>
+                </h1>
+                <p class="text-xs text-slate-400">PPE 安全帽 / 背心偵測 · 電子圍欄 · 環境感測 · MQTT 雙向連動</p>
+            </div>
+        </div>
+
+        <!-- 狀態指示徽章 -->
+        <div class="flex items-center space-x-4 mt-2 sm:mt-0">
+            <!-- 實體警報塔燈 (3 色模擬) -->
+            <div class="flex items-center bg-slate-900/80 px-3 py-1.5 rounded-lg border border-borderBg space-x-2">
+                <span class="text-xs text-slate-400 font-mono">TOWER:</span>
+                <div class="flex space-x-1.5 items-center">
+                    <div id="tower-red" class="w-3.5 h-3.5 rounded-full bg-red-950/80 transition-all duration-300"></div>
+                    <div id="tower-yellow" class="w-3.5 h-3.5 rounded-full bg-amber-950/80 transition-all duration-300"></div>
+                    <div id="tower-green" class="w-3.5 h-3.5 rounded-full tower-green-active transition-all duration-300"></div>
+                </div>
+                <div id="buzzer-tag" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                    BUZZER: OFF
+                </div>
+            </div>
+
+            <!-- 音效開關按鈕 -->
+            <button id="btn-sound-toggle" onclick="toggleAudio()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-borderBg text-xs font-mono transition text-amber-300 shadow-sm cursor-pointer">
+                <span id="sound-icon">🔇</span>
+                <span id="sound-text">點擊啟用音效</span>
+            </button>
+
+            <!-- MQTT 連線狀態 -->
+            <div class="flex items-center space-x-2 px-3 py-1.5 bg-slate-900/80 rounded-lg border border-borderBg text-xs font-mono">
+                <div id="mqtt-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span>MQTT: <span id="mqtt-broker-name" class="text-cyan-400">broker.emqx.io</span></span>
+            </div>
+
+            <!-- WebSocket 即時連線 -->
+            <div class="flex items-center space-x-2 px-3 py-1.5 bg-slate-900/80 rounded-lg border border-borderBg text-xs font-mono">
+                <div id="ws-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                <span id="ws-status">LIVE WS</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="flex-1 p-6 space-y-6 max-w-7xl mx-auto w-full">
+
+        <!-- 頂部 4 大 KPI 遙測卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <!-- 溫度 -->
+            <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-sm hover:border-slate-600 transition">
+                <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+                    <span>環境溫度 (Temperature)</span>
+                    <span class="text-cyan-400 font-mono">ENV_01</span>
+                </div>
+                <div class="mt-2 flex items-baseline justify-between">
+                    <span id="val-temp" class="text-2xl font-bold font-mono text-white">26.5</span>
+                    <span class="text-xs text-slate-400">°C (上限 40.0)</span>
+                </div>
+                <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div id="bar-temp" class="bg-cyan-500 h-1.5 rounded-full transition-all duration-500" style="width: 50%;"></div>
+                </div>
+            </div>
+
+            <!-- 濕度 -->
+            <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-sm hover:border-slate-600 transition">
+                <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+                    <span>環境濕度 (Humidity)</span>
+                    <span class="text-cyan-400 font-mono">ENV_01</span>
+                </div>
+                <div class="mt-2 flex items-baseline justify-between">
+                    <span id="val-hum" class="text-2xl font-bold font-mono text-white">60.0</span>
+                    <span class="text-xs text-slate-400">% RH</span>
+                </div>
+                <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div id="bar-hum" class="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style="width: 60%;"></div>
+                </div>
+            </div>
+
+            <!-- 二氧化碳 -->
+            <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-sm hover:border-slate-600 transition">
+                <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+                    <span>氣體濃度 (CO2 / TVOC)</span>
+                    <span class="text-amber-400 font-mono">AIR_QUAL</span>
+                </div>
+                <div class="mt-2 flex items-baseline justify-between">
+                    <span id="val-co2" class="text-2xl font-bold font-mono text-white">550</span>
+                    <span class="text-xs text-slate-400">ppm (上限 1200)</span>
+                </div>
+                <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div id="bar-co2" class="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style="width: 45%;"></div>
+                </div>
+            </div>
+
+            <!-- 機台振動 -->
+            <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-sm hover:border-slate-600 transition">
+                <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+                    <span>馬達振動 (Vibration RMS)</span>
+                    <span class="text-purple-400 font-mono">CNC_M03</span>
+                </div>
+                <div class="mt-2 flex items-baseline justify-between">
+                    <span id="val-vib" class="text-2xl font-bold font-mono text-white">2.2</span>
+                    <span class="text-xs text-slate-400">mm/s (上限 7.5)</span>
+                </div>
+                <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div id="bar-vib" class="bg-purple-500 h-1.5 rounded-full transition-all duration-500" style="width: 30%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 中間區域：視訊推論 (左) + 即時圖表 (右) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- 左側：YOLO 視覺與電子圍欄監控 (7 格) -->
+            <div class="lg:col-span-7 bg-cardBg border border-borderBg rounded-xl overflow-hidden shadow-md flex flex-col">
+                <div class="px-5 py-3 border-b border-borderBg flex flex-wrap gap-2 items-center justify-between bg-slate-900/50">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                        <h2 class="font-bold text-sm text-white">CAM_01 AI 工安監控</h2>
+                        <span id="mode-badge" class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-600">一般巡檢</span>
+                    </div>
+                    <div class="flex items-center space-x-3 text-xs font-mono text-slate-400">
+                        <select id="source-select" onchange="changeSource(this.value)" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-200 text-xs"></select>
+                        <span>FPS <b id="hud-fps" class="text-emerald-400">--</b></span>
+                        <span>AI <b id="hud-infer" class="text-emerald-400">--</b>Hz</span>
+                        <span id="hud-device" class="text-cyan-400">--</span>
+                    </div>
+                </div>
+
+                <!-- 視訊畫面本體 -->
+                <div id="video-wrap" class="relative bg-black flex items-center justify-center flex-1 min-h-[380px] overflow-hidden">
+                    <img id="video-stream" src="/api/video_feed" alt="即時串流載入中..." class="w-full h-full object-contain">
+                    <canvas id="zone-canvas" class="absolute inset-0 w-full h-full hidden cursor-crosshair"></canvas>
+
+                    <!-- 畫面左上角告警浮動 Banner -->
+                    <div id="video-alert-overlay" class="absolute top-10 left-4 bg-red-600/90 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold flex items-center space-x-2 hidden animate-bounce">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <span id="video-alert-text">人員闖入危險禁區！</span>
+                    </div>
+
+                    <div id="ppe-warning" class="absolute top-10 right-4 bg-amber-600/90 text-white px-3 py-1.5 rounded-lg text-[11px] hidden">
+                        尚未訓練 PPE 模型，目前只偵測禁區
+                    </div>
+
+                    <!-- 畫面右下角即時統計浮動牌 -->
+                    <div class="absolute bottom-8 right-4 bg-slate-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-slate-700 text-xs font-mono space-y-1">
+                        <div class="text-slate-300">畫面人數: <span id="stat-person" class="text-cyan-400 font-bold">0</span></div>
+                        <div class="text-slate-300">未戴安全帽: <span id="stat-helmet" class="text-amber-400 font-bold">0</span></div>
+                        <div class="text-slate-300">未穿背心: <span id="stat-vest" class="text-amber-400 font-bold">0</span></div>
+                        <div class="text-slate-300">闖入禁區: <span id="stat-violations" class="text-red-400 font-bold">0</span></div>
+                    </div>
+                </div>
+
+                <!-- 視訊下方：圖例 + 禁區編輯 -->
+                <div class="p-3 bg-slate-900/40 border-t border-borderBg flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div class="text-slate-400 flex flex-wrap items-center gap-2">
+                        <span class="inline-block w-3 h-3 border-2 border-emerald-500 rounded-sm"></span><span>合規</span>
+                        <span class="inline-block w-3 h-3 border-2 border-amber-400 rounded-sm ml-2"></span><span>缺 PPE (H=安全帽 V=背心)</span>
+                        <span class="inline-block w-3 h-3 bg-red-500/30 border-2 border-red-500 rounded-sm ml-2"></span><span>禁區 / 闖入</span>
+                    </div>
+                    <div id="zone-controls" class="flex items-center gap-2">
+                        <button id="btn-zone-edit" onclick="startZoneEdit()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200">✏️ 重畫禁區</button>
+                        <span id="zone-edit-tools" class="hidden items-center gap-2">
+                            <span class="text-amber-300">在畫面上依序點選頂點 (<span id="zone-pt-count">0</span>)</span>
+                            <button onclick="saveZone()" class="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white">儲存</button>
+                            <button onclick="cancelZoneEdit()" class="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white">取消</button>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：即時數據趨勢圖表 (5 格) -->
+            <div class="lg:col-span-5 flex flex-col space-y-6">
+                <!-- 圖表 1: 溫濕度 & CO2 動態時序 -->
+                <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-md flex flex-col flex-1">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">環境站遙測動態 (Env Telemetry)</h3>
+                        <span class="text-[11px] font-mono text-cyan-400">1 Hz 更新</span>
+                    </div>
+                    <div id="chart-env" class="w-full h-[180px]"></div>
+                </div>
+
+                <!-- 圖表 2: 馬達振動波形 (Vibration) -->
+                <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-md flex flex-col flex-1">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">CNC 馬達振動頻率 (Vibration mm/s)</h3>
+                        <span class="text-[11px] font-mono text-purple-400">閥值: 7.5 mm/s</span>
+                    </div>
+                    <div id="chart-vib" class="w-full h-[180px]"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 違規存證紀錄 -->
+        <div class="bg-cardBg border border-borderBg rounded-xl p-4 shadow-md">
+            <div class="flex items-center justify-between mb-3 border-b border-borderBg pb-2.5">
+                <div class="flex items-center space-x-2">
+                    <span>📸</span>
+                    <h3 class="text-sm font-bold text-white">違規自動拍照存證 (Evidence)</h3>
+                    <span class="text-[11px] text-slate-400 font-mono">照片存於 evidence/ 資料夾，MQTT 只傳網址</span>
+                </div>
+                <span class="text-xs text-slate-400">共 <b id="evidence-count" class="text-white">0</b> 筆</span>
+            </div>
+            <div id="evidence-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[340px] overflow-y-auto pr-1">
+                <div class="text-slate-500 italic text-xs col-span-full">尚無違規紀錄</div>
+            </div>
+        </div>
+
+        <!-- 照片放大檢視 -->
+        <div id="evidence-modal" onclick="this.classList.add('hidden')" class="fixed inset-0 bg-black/80 z-[60] hidden flex items-center justify-center p-6 cursor-zoom-out">
+            <div class="max-w-4xl w-full">
+                <img id="evidence-modal-img" class="w-full rounded-lg border border-slate-600">
+                <div id="evidence-modal-text" class="mt-2 text-sm text-slate-200 font-mono"></div>
+            </div>
+        </div>
+
+        <!-- 底部區域：MQTT 訊息紀錄 (左) + 系統交互控制 (右) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- MQTT 與工安事件記錄日誌 (8 格) -->
+            <div class="lg:col-span-8 bg-cardBg border border-borderBg rounded-xl p-4 shadow-md flex flex-col">
+                <div class="flex items-center justify-between mb-3 border-b border-borderBg pb-2.5">
+                    <div class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                        <h3 class="text-sm font-bold text-white">MQTT 總線事件與工安稽核日誌 (Live Bus Audit)</h3>
+                    </div>
+                    <button onclick="clearLogs()" class="text-xs text-slate-400 hover:text-white transition">清空日誌</button>
+                </div>
+                
+                <div id="log-container" class="space-y-2 max-h-56 overflow-y-auto font-mono text-xs pr-1">
+                    <div class="text-slate-500 italic">正在等待 MQTT 訊息匯流排推播...</div>
+                </div>
+            </div>
+
+            <!-- 工安控制與展示操縱台 (4 格) -->
+            <div class="lg:col-span-4 bg-cardBg border border-borderBg rounded-xl p-4 shadow-md flex flex-col justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-white mb-2 border-b border-borderBg pb-2.5">
+                        雙向聯防控制台 (Command & Control)
+                    </h3>
+                    <p class="text-xs text-slate-400 mb-4">
+                        透過 MQTT <code class="text-cyan-400">control/alarm</code> 控制塔燈與蜂鳴器、<code class="text-cyan-400">control/camera</code> 控制攝影機巡檢模式。<br>
+                        主題根目錄：<code id="topic-root" class="text-cyan-400">--</code>
+                    </p>
+
+                    <div class="space-y-3">
+                        <!-- 警報重設按鈕 -->
+                        <button onclick="resetAlarm()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-4 rounded-lg text-xs transition flex items-center justify-center space-x-2 shadow-md">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            <span>手動復歸警報 (Reset Tower to Green)</span>
+                        </button>
+
+                        <!-- 蜂鳴器消音按鈕 -->
+                        <button onclick="muteBuzzer()" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 px-4 rounded-lg text-xs transition flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                            <span>蜂鳴器消音 (Mute Buzzer)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 履歷展示功能按鈕區 -->
+                <div class="mt-4 pt-3 border-t border-borderBg space-y-2.5">
+                    <span class="text-[11px] font-bold text-cyan-400 block mb-1">🎮 實機交互展示：情境觸發</span>
+                    
+                    <!-- 感測異常注入按鈕 -->
+                    <button id="btn-anomaly" onclick="toggleAnomaly()" class="w-full bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/80 text-amber-200 font-medium py-2 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-2">
+                        <span>🔥 注入感測異常 (高溫 → 自動加強巡檢)</span>
+                    </button>
+
+                    <!-- 手動巡檢按鈕 -->
+                    <button id="btn-inspect" onclick="toggleInspection()" class="w-full bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-medium py-2 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-2">
+                        <span>🔎 手動下達加強巡檢指令</span>
+                    </button>
+
+                    <p class="text-[11px] text-slate-500 leading-relaxed">
+                        想用自己測試：影像來源切到「筆電鏡頭」，沒戴安全帽 / 背心就會觸發；
+                        按「重畫禁區」把禁區畫在畫面一側，走進去即觸發闖入警報。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 頁尾 -->
+    <footer class="border-t border-borderBg/60 px-6 py-3 text-center text-xs text-slate-500 font-mono">
+        SafeFactory AIoT Architecture • Built with FastAPI, Paho-MQTT, Ultralytics YOLOv8 & ECharts
+    </footer>
+
+    <!-- 前端腳本 -->
+    <script>
+        // ECharts 初始化
+        const chartEnv = echarts.init(document.getElementById('chart-env'), 'dark');
+        const chartVib = echarts.init(document.getElementById('chart-vib'), 'dark');
+
+        const envHistory = { times: [], temp: [], co2: [] };
+        const vibHistory = { times: [], vib: [] };
+        const MAX_POINTS = 20;
+
+        const commonGrid = { top: 25, bottom: 25, left: 40, right: 20 };
+
+        chartEnv.setOption({
+            backgroundColor: 'transparent',
+            grid: commonGrid,
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#64748b' } } },
+            yAxis: [
+                { type: 'value', name: '°C', axisLine: { lineStyle: { color: '#06b6d4' } }, splitLine: { lineStyle: { color: '#334155' } } },
+                { type: 'value', name: 'ppm', position: 'right', axisLine: { lineStyle: { color: '#10b981' } }, splitLine: { show: false } }
+            ],
+            series: [
+                { name: '溫度', type: 'line', smooth: true, data: [], color: '#06b6d4', yAxisIndex: 0 },
+                { name: 'CO2', type: 'line', smooth: true, data: [], color: '#10b981', yAxisIndex: 1 }
+            ]
+        });
+
+        chartVib.setOption({
+            backgroundColor: 'transparent',
+            grid: commonGrid,
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#64748b' } } },
+            yAxis: { type: 'value', name: 'mm/s', splitLine: { lineStyle: { color: '#334155' } } },
+            series: [
+                {
+                    name: '振動',
+                    type: 'line',
+                    smooth: true,
+                    data: [],
+                    color: '#c084fc',
+                    markLine: {
+                        data: [{ yAxis: 7.5, name: '危險閾值' }],
+                        lineStyle: { color: '#ef4444', type: 'dashed' }
+                    }
+                }
+            ]
+        });
+
+        window.addEventListener('resize', () => {
+            chartEnv.resize();
+            chartVib.resize();
+        });
+
+        // WebSocket 連線與處理
+        let ws;
+        let anomalyActive = false;
+        let intrusionActive = false;
+        let violationTotal = 0;
+
+        // -------------------------------------------------------------
+        // Web Audio API 工業蜂鳴器音效合成 (真實發聲)
+        // -------------------------------------------------------------
+        let audioCtx = null;
+        let soundEnabled = false;
+        let isBeeping = false;
+        let beepTimer = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function toggleAudio() {
+            initAudio();
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('btn-sound-toggle');
+            const icon = document.getElementById('sound-icon');
+            const text = document.getElementById('sound-text');
+            if (soundEnabled) {
+                btn.className = 'flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 rounded-lg border border-emerald-700 text-xs font-mono transition text-emerald-300 shadow-sm cursor-pointer';
+                icon.innerText = '🔊';
+                text.innerText = '警報音效: 已啟用';
+                playSingleBeep(700, 0.08); // 輕聲確認音
+                addLog('AUDIO', '真實警報蜂鳴音效已啟用 (喇叭已就緒)', 'text-emerald-400');
+            } else {
+                btn.className = 'flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-borderBg text-xs font-mono transition text-slate-400 shadow-sm cursor-pointer';
+                icon.innerText = '🔇';
+                text.innerText = '點擊啟用音效';
+                stopBuzzerAudio();
+                addLog('AUDIO', '真實警報音效已靜音', 'text-slate-400');
+            }
+        }
+
+        // 合成單聲逼真工業蜂鳴 (急促方波)
+        function playSingleBeep(freq = 950, duration = 0.12) {
+            if (!audioCtx || !soundEnabled) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square'; // 工業方波
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        // 連續急促警報 (嗶-嗶-嗶)
+        function startBuzzerAudio() {
+            if (!soundEnabled || isBeeping) return;
+            isBeeping = true;
+            playSingleBeep(920, 0.12);
+            beepTimer = setInterval(() => {
+                if (!soundEnabled || !isBeeping) {
+                    stopBuzzerAudio();
+                    return;
+                }
+                playSingleBeep(920, 0.12);
+                setTimeout(() => {
+                    if (isBeeping && soundEnabled) playSingleBeep(1150, 0.12);
+                }, 140);
+            }, 420);
+        }
+
+        function stopBuzzerAudio() {
+            isBeeping = false;
+            if (beepTimer) {
+                clearInterval(beepTimer);
+                beepTimer = null;
+            }
+        }
+
+        // 點擊頁面任意處時解鎖 AudioContext
+        document.addEventListener('click', () => {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }, { once: true });
+
+        function connectWS() {
+            const loc = window.location;
+            const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${loc.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                document.getElementById('ws-dot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+                document.getElementById('ws-status').innerText = 'LIVE WS';
+                addLog('SYSTEM', '系統與後端 WebSocket 握手成功');
+            };
+
+            ws.onclose = () => {
+                document.getElementById('ws-dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+                document.getElementById('ws-status').innerText = 'WS RECONNECTING';
+                setTimeout(connectWS, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'mqtt_message') {
+                        handleMQTTMessage(msg.channel, msg.data, msg.topic);
+                    } else if (msg.type === 'init_state') {
+                        updateTowerDisplay(msg.data.tower_light, msg.data.buzzer);
+                        document.getElementById('mqtt-broker-name').innerText = msg.data.mqtt_broker;
+                        document.getElementById('topic-root').innerText = msg.data.topic_root + '/#';
+                    }
+                } catch (e) {
+                    console.error('WS Parse error', e);
+                }
+            };
+        }
+
+        function handleMQTTMessage(channel, data, topic) {
+            const nowStr = new Date().toLocaleTimeString();
+
+            if (channel === 'telemetry/env') {
+                document.getElementById('val-temp').innerText = data.temperature.toFixed(1);
+                document.getElementById('val-hum').innerText = data.humidity.toFixed(1);
+                document.getElementById('val-co2').innerText = Math.round(data.co2);
+                
+                // 更新進度條
+                document.getElementById('bar-temp').style.width = Math.min((data.temperature / 50) * 100, 100) + '%';
+                document.getElementById('bar-hum').style.width = Math.min(data.humidity, 100) + '%';
+                document.getElementById('bar-co2').style.width = Math.min((data.co2 / 1500) * 100, 100) + '%';
+
+                updateTowerDisplay(data.tower_light, data.buzzer);
+
+                // 更新環境圖表
+                envHistory.times.push(nowStr);
+                envHistory.temp.push(data.temperature);
+                envHistory.co2.push(data.co2);
+                if (envHistory.times.length > MAX_POINTS) {
+                    envHistory.times.shift();
+                    envHistory.temp.shift();
+                    envHistory.co2.shift();
+                }
+                chartEnv.setOption({
+                    xAxis: { data: envHistory.times },
+                    series: [{ data: envHistory.temp }, { data: envHistory.co2 }]
+                });
+
+            } else if (channel === 'telemetry/machine') {
+                document.getElementById('val-vib').innerText = data.vibration.toFixed(2);
+                document.getElementById('bar-vib').style.width = Math.min((data.vibration / 10) * 100, 100) + '%';
+
+                vibHistory.times.push(nowStr);
+                vibHistory.vib.push(data.vibration);
+                if (vibHistory.times.length > MAX_POINTS) {
+                    vibHistory.times.shift();
+                    vibHistory.vib.shift();
+                }
+                chartVib.setOption({
+                    xAxis: { data: vibHistory.times },
+                    series: [{ data: vibHistory.vib }]
+                });
+
+            } else if (channel === 'vision/alerts') {
+                addEvidence(data, true);
+                if (data.event === 'PATROL_SNAPSHOT') {
+                    addLog('PATROL', '加強巡檢自動拍照存證', 'text-orange-300');
+                    return;
+                }
+                const overlay = document.getElementById('video-alert-overlay');
+                document.getElementById('video-alert-text').innerText = data.message;
+                overlay.className = overlay.className.replace(/bg-(red|amber)-600\/90/, data.severity === 'CRITICAL' ? 'bg-red-600/90' : 'bg-amber-600/90');
+                overlay.classList.remove('hidden');
+                setTimeout(() => overlay.classList.add('hidden'), 2500);
+                addLog('VISION_ALERT', `${data.message} [${data.severity}]`, data.severity === 'CRITICAL' ? 'text-red-400 font-bold' : 'text-amber-300 font-bold');
+
+            } else if (channel === 'control/alarm') {
+                if (data.command === 'SET') {
+                    updateTowerDisplay(data.tower_light, data.buzzer);
+                    addLog('AI→IoT', `塔燈 ${data.tower_light}${data.buzzer ? ' + 蜂鳴器' : ''}：${data.reason}`, 'text-red-300');
+                } else {
+                    if (data.command === 'RESET_ALARM') updateTowerDisplay('GREEN', false);
+                    addLog('CONTROL', data.command, 'text-emerald-400');
+                }
+
+            } else if (channel === 'control/camera') {
+                const on = data.enable;
+                addLog('IoT→AI', on ? `攝影機加強巡檢 ${data.duration_s}s：${data.reason}` : `解除加強巡檢：${data.reason}`, on ? 'text-orange-300 font-bold' : 'text-emerald-400');
+
+            } else if (channel === 'status/devices') {
+                addLog('LWT_STATUS', `設備 ${data.device} 狀態變更: ${data.status}`, 'text-amber-400');
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 違規存證圖庫
+        // -------------------------------------------------------------
+        const EVENT_LABEL = { NO_HELMET: '未戴安全帽', NO_VEST: '未穿背心', ZONE_INTRUSION: '闖入禁區', PATROL_SNAPSHOT: '巡檢照' };
+        const EVENT_COLOR = { CRITICAL: 'bg-red-600', WARNING: 'bg-amber-500', INFO: 'bg-orange-700' };
+        let evidenceCount = 0;
+
+        function addEvidence(ev, prepend) {
+            const grid = document.getElementById('evidence-grid');
+            if (evidenceCount === 0) grid.innerHTML = '';
+            evidenceCount++;
+            document.getElementById('evidence-count').innerText = evidenceCount;
+            const t = new Date(ev.timestamp * 1000).toLocaleString();
+            const card = document.createElement('div');
+            card.className = 'bg-slate-900 rounded-lg overflow-hidden border border-slate-700 hover:border-cyan-500 cursor-zoom-in transition';
+            card.innerHTML = `
+                <div class="relative"><img src="${ev.snapshot_url}" loading="lazy" class="w-full aspect-[4/3] object-cover">
+                <span class="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 rounded text-white ${EVENT_COLOR[ev.severity] || 'bg-slate-600'}">${EVENT_LABEL[ev.event] || ev.event}</span>
+                ${ev.mode === 'enhanced' ? '<span class="absolute top-1 right-1 text-[10px] px-1 rounded bg-orange-500 text-black">加強</span>' : ''}</div>
+                <div class="px-2 py-1 text-[10px] font-mono text-slate-400 truncate">${t}${ev.track_id != null ? ' · ID ' + ev.track_id : ''}</div>`;
+            card.onclick = () => {
+                document.getElementById('evidence-modal-img').src = ev.snapshot_url;
+                document.getElementById('evidence-modal-text').innerText = `${t}  ${ev.camera_id}  ${ev.message}  信心度 ${ev.confidence ?? '-'}`;
+                document.getElementById('evidence-modal').classList.remove('hidden');
+            };
+            prepend ? grid.prepend(card) : grid.appendChild(card);
+            while (grid.children.length > 60) grid.removeChild(grid.lastChild);
+        }
+
+        async function loadEvents() {
+            try {
+                const events = await (await fetch('/api/events?limit=60')).json();
+                events.forEach(ev => addEvidence(ev, false));
+            } catch (e) {}
+        }
+
+        // -------------------------------------------------------------
+        // 影像來源
+        // -------------------------------------------------------------
+        async function loadSources() {
+            const data = await (await fetch('/api/vision/sources')).json();
+            const sel = document.getElementById('source-select');
+            sel.innerHTML = data.sources.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+            sel.value = data.current;
+        }
+
+        async function changeSource(source) {
+            await fetch('/api/vision/source', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source })
+            });
+            addLog('CAMERA', `切換影像來源：${source}`, 'text-cyan-300');
+        }
+
+        // -------------------------------------------------------------
+        // 禁區編輯：在畫面上點選多邊形頂點
+        // -------------------------------------------------------------
+        let zoneEditing = false;
+        let zonePoints = [];
+
+        function imageRect() {
+            // 影像以 object-contain 顯示，算出實際畫面在元素中的位置
+            const img = document.getElementById('video-stream');
+            const r = img.getBoundingClientRect();
+            const ratio = 640 / 480;
+            let w = r.width, h = r.width / ratio;
+            if (h > r.height) { h = r.height; w = h * ratio; }
+            return { x: (r.width - w) / 2, y: (r.height - h) / 2, w, h };
+        }
+
+        function drawZoneCanvas() {
+            const c = document.getElementById('zone-canvas');
+            c.width = c.clientWidth; c.height = c.clientHeight;
+            const ctx = c.getContext('2d');
+            const ir = imageRect();
+            ctx.clearRect(0, 0, c.width, c.height);
+            if (!zonePoints.length) return;
+            ctx.beginPath();
+            zonePoints.forEach(([x, y], i) => {
+                const px = ir.x + x * ir.w, py = ir.y + y * ir.h;
+                i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+            });
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.25)'; ctx.fill();
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2; ctx.stroke();
+            zonePoints.forEach(([x, y]) => {
+                ctx.beginPath(); ctx.arc(ir.x + x * ir.w, ir.y + y * ir.h, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#facc15'; ctx.fill();
+            });
+        }
+
+        function startZoneEdit() {
+            zoneEditing = true; zonePoints = [];
+            document.getElementById('zone-canvas').classList.remove('hidden');
+            document.getElementById('btn-zone-edit').classList.add('hidden');
+            document.getElementById('zone-edit-tools').classList.replace('hidden', 'flex');
+            document.getElementById('zone-pt-count').innerText = 0;
+            drawZoneCanvas();
+        }
+
+        function cancelZoneEdit() {
+            zoneEditing = false; zonePoints = [];
+            document.getElementById('zone-canvas').classList.add('hidden');
+            document.getElementById('btn-zone-edit').classList.remove('hidden');
+            document.getElementById('zone-edit-tools').classList.replace('flex', 'hidden');
+        }
+
+        async function saveZone() {
+            if (zonePoints.length < 3) { alert('禁區至少需要 3 個點'); return; }
+            await fetch('/api/vision/zone', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ points: zonePoints })
+            });
+            addLog('CAMERA', `禁區已更新 (${zonePoints.length} 個頂點)`, 'text-cyan-300');
+            cancelZoneEdit();
+        }
+
+        document.getElementById('zone-canvas').addEventListener('click', (e) => {
+            if (!zoneEditing) return;
+            const c = e.currentTarget.getBoundingClientRect();
+            const ir = imageRect();
+            const x = (e.clientX - c.left - ir.x) / ir.w;
+            const y = (e.clientY - c.top - ir.y) / ir.h;
+            if (x < 0 || x > 1 || y < 0 || y > 1) return;
+            zonePoints.push([+x.toFixed(4), +y.toFixed(4)]);
+            document.getElementById('zone-pt-count').innerText = zonePoints.length;
+            drawZoneCanvas();
+        });
+
+        function updateTowerDisplay(light, buzzer) {
+            const r = document.getElementById('tower-red');
+            const y = document.getElementById('tower-yellow');
+            const g = document.getElementById('tower-green');
+            const b = document.getElementById('buzzer-tag');
+
+            r.className = 'w-3.5 h-3.5 rounded-full bg-red-950/80 transition-all duration-300';
+            y.className = 'w-3.5 h-3.5 rounded-full bg-amber-950/80 transition-all duration-300';
+            g.className = 'w-3.5 h-3.5 rounded-full bg-emerald-950/80 transition-all duration-300';
+
+            if (light === 'RED') {
+                r.className = 'w-3.5 h-3.5 rounded-full tower-red-active transition-all duration-300';
+            } else if (light === 'YELLOW') {
+                y.className = 'w-3.5 h-3.5 rounded-full tower-yellow-active transition-all duration-300';
+            } else {
+                g.className = 'w-3.5 h-3.5 rounded-full tower-green-active transition-all duration-300';
+            }
+
+            if (buzzer) {
+                b.className = 'text-xs px-2 py-0.5 rounded bg-red-600 text-white font-mono animate-pulse';
+                b.innerText = 'BUZZER: ALARMING';
+                startBuzzerAudio();
+            } else {
+                b.className = 'text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+                b.innerText = 'BUZZER: OFF';
+                stopBuzzerAudio();
+            }
+        }
+
+        function addLog(tag, content, customClass = 'text-slate-300') {
+            const container = document.getElementById('log-container');
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'flex items-baseline space-x-2 border-b border-slate-800/60 pb-1';
+            div.innerHTML = `
+                <span class="text-slate-500">[${time}]</span>
+                <span class="px-1.5 py-0.2 rounded bg-slate-800 text-cyan-400 text-[10px] font-mono">${tag}</span>
+                <span class="${customClass}">${content}</span>
+            `;
+            container.prepend(div);
+            // 限制最多 40 筆
+            if (container.children.length > 40) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('log-container').innerHTML = '<div class="text-slate-500 italic">日誌已清空。</div>';
+        }
+
+        // 控制按鈕動作
+        const BTN_ANOMALY_OFF = 'w-full bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/80 text-amber-200 font-medium py-2 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-2';
+        const BTN_ANOMALY_ON = 'w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-2 animate-pulse';
+
+        function renderAnomalyButton() {
+            const btn = document.getElementById('btn-anomaly');
+            btn.className = anomalyActive ? BTN_ANOMALY_ON : BTN_ANOMALY_OFF;
+            btn.innerHTML = anomalyActive ? '<span>🚨 高溫異常模擬中 (點擊取消)</span>' : '<span>🔥 注入感測異常 (高溫 → 自動加強巡檢)</span>';
+        }
+
+        async function resetAlarm() {
+            stopBuzzerAudio();
+            anomalyActive = false;
+            renderAnomalyButton();
+            await fetch('/api/control/alarm_reset', { method: 'POST' });
+            addLog('CONTROL', '發送手動復歸指令 (RESET_ALARM + 解除加強巡檢)', 'text-emerald-400');
+        }
+
+        let inspectionOn = false;
+        async function toggleInspection() {
+            await fetch('/api/control/inspection', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enable: !inspectionOn })
+            });
+        }
+
+        async function muteBuzzer() {
+            stopBuzzerAudio();
+            await fetch('/api/control/buzzer_mute', { method: 'POST' });
+            addLog('CONTROL', '發送蜂鳴器消音指令 (MUTE_BUZZER)', 'text-cyan-400');
+        }
+
+        async function toggleAnomaly() {
+            anomalyActive = !anomalyActive;
+            renderAnomalyButton();
+            await fetch('/api/control/anomaly', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enable: anomalyActive })
+            });
+            addLog('SIMULATOR', `感測異常注入狀態: ${anomalyActive ? '開啟' : '關閉'}`, 'text-amber-400');
+        }
+
+        // 定期輪詢系統狀態 (FPS 與 人數)
+        setInterval(async () => {
+            try {
+                const data = await (await fetch('/api/status')).json();
+                const v = data.vision;
+                document.getElementById('hud-fps').innerText = v.fps;
+                document.getElementById('hud-infer').innerText = v.infer_fps;
+                document.getElementById('hud-device').innerText = v.device.replace('NVIDIA GeForce ', '');
+                document.getElementById('stat-person').innerText = v.persons;
+                document.getElementById('stat-helmet').innerText = v.counts.NO_HELMET;
+                document.getElementById('stat-vest').innerText = v.counts.NO_VEST;
+                document.getElementById('stat-violations').innerText = v.counts.ZONE_INTRUSION;
+                document.getElementById('ppe-warning').classList.toggle('hidden', v.ppe_model_loaded);
+                document.getElementById('mqtt-dot').className = 'w-2.5 h-2.5 rounded-full ' + (data.mqtt_connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500');
+                if (!data.mqtt_connected) document.getElementById('mqtt-broker-name').innerText = '離線 (本機備援)';
+                else document.getElementById('mqtt-broker-name').innerText = data.broker;
+
+                inspectionOn = v.mode === 'enhanced';
+                const badge = document.getElementById('mode-badge');
+                badge.innerText = inspectionOn ? `🔎 加強巡檢 ${v.enhanced_remaining}s` : '一般巡檢';
+                badge.className = 'text-[11px] px-2 py-0.5 rounded font-mono border ' +
+                    (inspectionOn ? 'bg-orange-500 text-black border-orange-300 animate-pulse' : 'bg-slate-800 text-slate-300 border-slate-600');
+                document.getElementById('btn-inspect').innerHTML = inspectionOn ? '<span>🛑 解除加強巡檢</span>' : '<span>🔎 手動下達加強巡檢指令</span>';
+
+                if (anomalyActive !== data.anomaly_mode) { anomalyActive = data.anomaly_mode; renderAnomalyButton(); }
+                const sel = document.getElementById('source-select');
+                if (sel.value !== v.source && sel.options.length) sel.value = v.source;
+            } catch (e) {}
+        }, 1000);
+
+        // 啟動
+        connectWS();
+        loadSources();
+        loadEvents();
+    </script>
+</body>
+</html>
