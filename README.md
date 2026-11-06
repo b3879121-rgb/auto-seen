@@ -15,6 +15,23 @@
 
 > 不需要任何外接硬體：攝影機用筆電鏡頭 / 影片檔 / 工地照片圖庫，ESP32 感測器與警報塔燈以程式模擬，且一樣透過 MQTT 收發指令，之後換成實體設備不必改架構。
 
+![SafeFactory 儀表板](docs/images/dashboard.png)
+
+*溫度升到 42°C 後的儀表板：警報塔燈轉紅、攝影機自動進入「加強巡檢」(橘框與倒數)，違規照片即時出現在存證區。*
+
+---
+
+## 偵測結果範例
+
+| 未戴安全帽 | 闖入危險禁區 | 未穿反光背心 |
+|---|---|---|
+| ![未戴安全帽](docs/images/evidence_no_helmet.jpg) | ![闖入危險禁區](docs/images/evidence_zone.jpg) | ![未穿反光背心](docs/images/evidence_no_vest.jpg) |
+| 有背心、護目鏡，但沒戴安全帽 → `H:NO V:OK` | 人員裝備齊全，但腳踩進紅色禁區 → `ZONE!` | 有戴安全帽，但背心不是反光款 → `V:NO` |
+
+框線顏色：**綠色** 合規、**黃色** 缺 PPE、**紅色** 在禁區內、**粉紅色** 為本次觸發存證的人員。照片底部浮水印記錄時間、攝影機與違規類型。
+
+> 範例照片來自 [Ultralytics Construction-PPE 資料集](https://docs.ultralytics.com/datasets/detect/construction-ppe/) 的驗證集 (CC BY 4.0)，模型訓練時沒有看過這些照片。
+
 ---
 
 ## 系統架構
@@ -81,7 +98,8 @@ auto-seen/
 │   └── vision_worker.py    # YOLO 偵測、追蹤、PPE 配對、存證
 ├── frontend/index.html     # 儀表板
 ├── tools/train_ppe.py      # 訓練安全帽 / 背心模型
-└── models/                 # 訓練好的 PPE 模型 (ppe_yolo11n.pt)
+├── models/                 # 訓練好的 PPE 模型 (ppe_yolo11n.pt)
+└── docs/images/            # README 用的截圖
 ```
 
 執行時才會產生的資料夾 (不在版本控制內)：`evidence/` 存證照片、`datasets/` 訓練資料、`training/` 訓練紀錄、`videos/` 自己放的測試影片。
