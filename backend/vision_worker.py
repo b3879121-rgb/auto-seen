@@ -28,6 +28,7 @@ import torch
 from ultralytics import YOLO
 from ultralytics.utils import SETTINGS
 
+from backend.text_render import TextLayer
 from backend.config import (
     ROOT_DIR,
     PERSON_MODEL,
@@ -60,6 +61,9 @@ EVENT_TEXT = {
     "ZONE_INTRUSION": ("CRITICAL", "偵測到人員闖入危險禁區"),
     "PATROL_SNAPSHOT": ("INFO", "加強巡檢自動拍照"),
 }
+EVENT_SHORT = {"NO_HELMET": "未戴安全帽", "NO_VEST": "未穿反光背心",
+               "ZONE_INTRUSION": "闖入危險禁區", "PATROL_SNAPSHOT": "巡檢照"}
+MARK = {"ok": "○", "missing": "╳", "unknown": "？"}  # 微軟正黑體沒有 ✓✗，用 ○╳ 表示有/無
 
 GREEN, YELLOW, RED, ORANGE, WHITE = (60, 200, 60), (0, 200, 255), (0, 0, 255), (0, 140, 255), (255, 255, 255)
 
@@ -73,6 +77,12 @@ def letterbox(frame: np.ndarray, w: int = VIDEO_WIDTH, h: int = VIDEO_HEIGHT) ->
     x, y = (w - nw) // 2, (h - nh) // 2
     out[y:y + nh, x:x + nw] = cv2.resize(frame, (nw, nh))
     return out
+
+
+def imread_unicode(path):
+    """cv2.imread 在 Windows 讀不到含中文的路徑，改用 numpy 讀檔再解碼。"""
+    data = np.fromfile(str(path), dtype=np.uint8)
+    return cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
 
 
 def demo_image_dir() -> Path:
@@ -117,8 +127,10 @@ class FrameSource:
     @property
     def label(self) -> str:
         if self.spec == "demo":
-            return f"DEMO {self.img_idx + 1}/{len(self.images)}"
-        return self.spec.upper()
+            return f"示範圖庫 {self.img_idx + 1}/{len(self.images)}"
+        if self.spec == "webcam":
+            return "筆電鏡頭"
+        return f"影片 {self.spec[5:]}"
 
     def read(self):
         if self.images:
@@ -126,7 +138,7 @@ class FrameSource:
             if self.current_img is None or now - self.img_since >= DEMO_IMAGE_SECONDS:
                 if self.current_img is not None:
                     self.img_idx = (self.img_idx + 1) % len(self.images)
-                img = cv2.imread(str(self.images[self.img_idx]))
+                img = imread_unicode(self.images[self.img_idx])
                 self.current_img = letterbox(img) if img is not None else None
                 self.img_since = now
             return None if self.current_img is None else self.current_img.copy()
@@ -345,6 +357,7 @@ class VisionWorker:
     # ---------------------------------------------------------
     def _draw(self, frame, people, ppe, source_label, now):
         out = frame.copy()
+        text = TextLayer()
         zone = self.zone_px()
         danger = any(p["in_zone"] for p in people)
 
@@ -353,7 +366,7 @@ class VisionWorker:
         cv2.addWeighted(overlay, 0.40 if danger else 0.22, out, 0.60 if danger else 0.78, 0, out)
         cv2.polylines(out, [zone], True, RED if danger else (60, 60, 230), 2)
         zx, zy = zone[:, 0].min(), zone[:, 1].min()
-        cv2.putText(out, "DANGER ZONE", (int(zx) + 6, int(zy) + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 2)
+        text.add("危險禁區", (int(zx) + 8, int(zy) + 6), WHITE, 18, bg=(0, 0, 160))
 
         for name, _, _, (x1, y1, x2, y2) in ppe:
             if name in ("helmet", "vest", "no_helmet", "no_vest"):
@@ -366,31 +379,28 @@ class VisionWorker:
             color = RED if p["in_zone"] else (YELLOW if bad else GREEN)
             cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
             cv2.circle(out, p["foot"], 4, color, -1)
-            tag = {"ok": "OK", "missing": "NO", "unknown": "?"}
-            label = f"ID{p['tid']}" if p["tid"] >= 0 else "new"
+            label = f"ID{p['tid']}" if p["tid"] >= 0 else "新目標"
             if self.ppe_model is not None:
-                label += f" H:{tag[p['helmet']]} V:{tag[p['vest']]}"
-            if p["in_zone"]:
-                label += " ZONE!"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-            cv2.rectangle(out, (x1, max(y1 - th - 8, 0)), (x1 + tw + 6, max(y1, th + 8)), color, -1)
-            cv2.putText(out, label, (x1 + 3, max(y1 - 5, th + 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
+                label += f" 安全帽{MARK[p['helmet']]} 背心{MARK[p['vest']]}"
+            # 紅框本身就代表在禁區內，標籤不再重複，保持精簡避免人多時互相重疊
+            fg = WHITE if p["in_zone"] else (0, 0, 0)  # 紅底配白字、黃/綠底配黑字
+            text.add(label, (x1, max(y1 - 2, 18)), fg, 14, bg=color, pad=2, anchor="lb")
 
         # 加強巡檢：橘色外框 + 倒數
         if self.mode == "enhanced":
             cv2.rectangle(out, (0, 0), (VIDEO_WIDTH - 1, VIDEO_HEIGHT - 1), ORANGE, 6)
             remain = max(0, int(self.enhanced_until - now))
             cv2.rectangle(out, (0, 0), (VIDEO_WIDTH, 30), ORANGE, -1)
-            cv2.putText(out, f"ENHANCED INSPECTION (HIGH TEMP)  {remain}s", (12, 21),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            text.add(f"加強巡檢中（高溫觸發） 剩 {remain} 秒", (VIDEO_WIDTH // 2, 15), (0, 0, 0), 19, anchor="mm")
         elif danger:
             cv2.rectangle(out, (0, 0), (VIDEO_WIDTH, 30), RED, -1)
-            cv2.putText(out, "!!! WORKER IN DANGER ZONE !!!", (150, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 2)
+            text.add("！！ 人員進入危險禁區 ！！", (VIDEO_WIDTH // 2, 15), WHITE, 19, anchor="mm")
 
-        hud = f"{source_label} | FPS {self.fps:.0f} | AI {self.infer_fps:.0f}Hz | {self.mode.upper()} | {self.device_name}"
+        mode = "加強巡檢" if self.mode == "enhanced" else "一般巡檢"
+        hud = f"{source_label} ｜ 畫面 {self.fps:.0f} FPS ｜ AI {self.infer_fps:.0f} 次/秒 ｜ {mode} ｜ {self.device_name.replace('NVIDIA GeForce ', '')}"
         cv2.rectangle(out, (0, VIDEO_HEIGHT - 24), (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0), -1)
-        cv2.putText(out, hud, (8, VIDEO_HEIGHT - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
-        return out, danger
+        text.add(hud, (8, VIDEO_HEIGHT - 12), (0, 255, 255), 13, anchor="lm")
+        return text.render(out), danger
 
     # ---------------------------------------------------------
     # 存證與事件
@@ -420,10 +430,14 @@ class VisionWorker:
             x1, y1, x2, y2 = person["box"]
             cv2.rectangle(img, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), (255, 0, 255), 3)
         # 底部 HUD 列換成存證浮水印 (黑底白字，不和畫面其他文字重疊)
-        stamp = now.strftime("%Y-%m-%d %H:%M:%S") + f"  CAM_01  {event}" + (f"  ID {tid}" if tid is not None else "")
+        stamp = now.strftime("%Y-%m-%d %H:%M:%S") + f"  CAM_01  {EVENT_SHORT[event]}" + (f"  ID {tid}" if tid is not None else "")
         cv2.rectangle(img, (0, VIDEO_HEIGHT - 24), (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0), -1)
-        cv2.putText(img, stamp, (8, VIDEO_HEIGHT - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
-        cv2.imwrite(str(folder / name), img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        layer = TextLayer()
+        layer.add(stamp, (8, VIDEO_HEIGHT - 12), WHITE, 14, anchor="lm")
+        img = layer.render(img)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if ok:
+            buf.tofile(str(folder / name))  # 用 tofile 寫檔，路徑含中文也沒問題
 
         severity, message = EVENT_TEXT[event]
         record = {
@@ -467,10 +481,11 @@ class VisionWorker:
 
     def _no_signal(self):
         img = np.zeros((VIDEO_HEIGHT, VIDEO_WIDTH, 3), np.uint8)
-        cv2.putText(img, "NO SIGNAL", (215, 230), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (80, 80, 255), 3)
-        cv2.putText(img, self.source_error[:70].encode("ascii", "ignore").decode(), (20, 280),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-        return img
+        layer = TextLayer()
+        layer.add("無影像訊號", (VIDEO_WIDTH // 2, 220), (80, 80, 255), 36, anchor="mm")
+        layer.add(self.source_error[:45], (VIDEO_WIDTH // 2, 275), (200, 200, 200), 15, anchor="mm")
+        layer.add("請在右上角切換影像來源", (VIDEO_WIDTH // 2, 305), (200, 200, 200), 15, anchor="mm")
+        return layer.render(img)
 
     def run_inference(self):
         src = self._open_source(self.source_spec)

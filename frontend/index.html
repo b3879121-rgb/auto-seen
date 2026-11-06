@@ -80,14 +80,14 @@
         <div class="flex items-center space-x-4 mt-2 sm:mt-0">
             <!-- 實體警報塔燈 (3 色模擬) -->
             <div class="flex items-center bg-slate-900/80 px-3 py-1.5 rounded-lg border border-borderBg space-x-2">
-                <span class="text-xs text-slate-400 font-mono">TOWER:</span>
+                <span class="text-xs text-slate-400 font-mono">警報塔燈</span>
                 <div class="flex space-x-1.5 items-center">
                     <div id="tower-red" class="w-3.5 h-3.5 rounded-full bg-red-950/80 transition-all duration-300"></div>
                     <div id="tower-yellow" class="w-3.5 h-3.5 rounded-full bg-amber-950/80 transition-all duration-300"></div>
                     <div id="tower-green" class="w-3.5 h-3.5 rounded-full tower-green-active transition-all duration-300"></div>
                 </div>
                 <div id="buzzer-tag" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
-                    BUZZER: OFF
+                    蜂鳴器：關閉
                 </div>
             </div>
 
@@ -106,7 +106,7 @@
             <!-- WebSocket 即時連線 -->
             <div class="flex items-center space-x-2 px-3 py-1.5 bg-slate-900/80 rounded-lg border border-borderBg text-xs font-mono">
                 <div id="ws-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
-                <span id="ws-status">LIVE WS</span>
+                <span id="ws-status">即時連線</span>
             </div>
         </div>
     </header>
@@ -224,7 +224,7 @@
                 <div class="p-3 bg-slate-900/40 border-t border-borderBg flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div class="text-slate-400 flex flex-wrap items-center gap-2">
                         <span class="inline-block w-3 h-3 border-2 border-emerald-500 rounded-sm"></span><span>合規</span>
-                        <span class="inline-block w-3 h-3 border-2 border-amber-400 rounded-sm ml-2"></span><span>缺 PPE (H=安全帽 V=背心)</span>
+                        <span class="inline-block w-3 h-3 border-2 border-amber-400 rounded-sm ml-2"></span><span>缺安全帽 / 背心 (○ 有、╳ 無)</span>
                         <span class="inline-block w-3 h-3 bg-red-500/30 border-2 border-red-500 rounded-sm ml-2"></span><span>禁區 / 闖入</span>
                     </div>
                     <div id="zone-controls" class="flex items-center gap-2">
@@ -511,13 +511,13 @@
 
             ws.onopen = () => {
                 document.getElementById('ws-dot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
-                document.getElementById('ws-status').innerText = 'LIVE WS';
+                document.getElementById('ws-status').innerText = '即時連線';
                 addLog('SYSTEM', '系統與後端 WebSocket 握手成功');
             };
 
             ws.onclose = () => {
                 document.getElementById('ws-dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500';
-                document.getElementById('ws-status').innerText = 'WS RECONNECTING';
+                document.getElementById('ws-status').innerText = '重新連線中';
                 setTimeout(connectWS, 2000);
             };
 
@@ -761,11 +761,11 @@
 
             if (buzzer) {
                 b.className = 'text-xs px-2 py-0.5 rounded bg-red-600 text-white font-mono animate-pulse';
-                b.innerText = 'BUZZER: ALARMING';
+                b.innerText = '蜂鳴器：鳴叫中';
                 startBuzzerAudio();
             } else {
                 b.className = 'text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
-                b.innerText = 'BUZZER: OFF';
+                b.innerText = '蜂鳴器：關閉';
                 stopBuzzerAudio();
             }
         }
